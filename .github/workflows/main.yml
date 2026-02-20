@@ -1,0 +1,86 @@
+name: Schwab Token Auto Refresher
+
+on:
+  schedule:
+    # Runs every 3 days at 21:00 Beijing Time (13:00 UTC)
+    - cron: '0 13 */3 * *'
+  workflow_dispatch: 
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-token:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true 
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Run Refresh Script
+        run: npm start
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SCHWAB_USERNAME: ${{ secrets.SCHWAB_USERNAME }}
+          SCHWAB_PASSWORD: ${{ secrets.SCHWAB_PASSWORD }}
+          SCHWAB_TOTP_SECRET: ${{ secrets.SCHWAB_TOTP_SECRET }}
+          SCHWAB_API_KEY: ${{ secrets.SCHWAB_API_KEY }}
+          SCHWAB_APP_SECRET: ${{ secrets.SCHWAB_APP_SECRET }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_SECRET_ID: ${{ secrets.GCP_SECRET_ID }}
+          SCHWAB_REDIRECT_URI: ${{ secrets.SCHWAB_REDIRECT_URI }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_config_file }}
+
+      - name: Upload Error Screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: '*.png'
+          retention-days: 3
+
+      - name: Update Log and Push
+        if: success()
+        shell: powershell
+        run: |
+          # 1. Basic Git Configuration
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # 2. Update the log file
+          $dateStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+          "Last successful refresh: $dateStr" | Out-File -FilePath last_run.txt -Encoding utf8
+          git add last_run.txt
+          
+          # 3. Check for changes and commit
+          $status = git status --porcelain
+          if ($status) {
+              Write-Host "Changes detected, committing..."
+              git commit -m "chore: auto-update login log [skip ci]"
+              
+              Write-Host "Pulling latest changes from remote..."
+              $remoteUrl = "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+              git pull --rebase $remoteUrl ${{ github.ref_name }}
+              
+              # 4. Push changes
+              Write-Host "Pushing to remote..."
+              git push $remoteUrl HEAD:${{ github.ref_name }}
+          } else {
+              Write-Host "No changes to commit"
+          }
