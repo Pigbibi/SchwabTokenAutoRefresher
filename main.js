@@ -190,6 +190,7 @@ async function main() {
         if (!interceptedCode) throw new Error("❌ Failed to intercept Code");
 
         const tokenDict = await exchangeCodeForToken(interceptedCode.replace('%40', '@'));
+        tokenDict.expires_at = Math.floor(Date.now() / 1000) + tokenDict.expires_in;
         await updateAndCleanupSecrets({
             creation_timestamp: Math.floor(Date.now() / 1000),
             token: tokenDict
