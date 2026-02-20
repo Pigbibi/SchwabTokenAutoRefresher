@@ -1,0 +1,60 @@
+name: Schwab Token Auto Refresher
+
+on:
+  schedule:
+    # Runs everyday at 21:00 Beijing Time (13:00 UTC)
+    - cron: '0 13 * * *'
+  workflow_dispatch: 
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false 
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Run Refresh Script
+        run: npm start
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SCHWAB_USERNAME: ${{ secrets.SCHWAB_USERNAME }}
+          SCHWAB_PASSWORD: ${{ secrets.SCHWAB_PASSWORD }}
+          SCHWAB_TOTP_SECRET: ${{ secrets.SCHWAB_TOTP_SECRET }}
+          SCHWAB_API_KEY: ${{ secrets.SCHWAB_API_KEY }}
+          SCHWAB_APP_SECRET: ${{ secrets.SCHWAB_APP_SECRET }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_config_file }}
+
+      - name: Update Log and Push
+        if: success()
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          echo "Last successful refresh: $(date)" > last_run.txt
+          git add last_run.txt
+          
+          git commit -m "Update login log [skip ci]" || echo "No changes to commit"
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
