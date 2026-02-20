@@ -48,6 +48,14 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_config_file }}
 
+      - name: Upload Error Screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: error_screenshot.png
+          retention-days: 3
+
       - name: Update Log and Push
         if: success()
         run: |
@@ -56,5 +64,5 @@ jobs:
           echo "Last successful refresh: $(date)" > last_run.txt
           git add last_run.txt
           
-          git commit -m "Update login log [skip ci]" || echo "No changes to commit"
+          git commit -m "chore: auto-update login log [skip ci]" || echo "No changes to commit"
           git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
