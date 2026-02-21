@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   refresh-token:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     
     steps:
       - name: Checkout Code
@@ -37,10 +37,7 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Run Refresh Script
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          xvfb-run --auto-servernum -- npm start
+        run: npm start
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           SCHWAB_USERNAME: ${{ secrets.SCHWAB_USERNAME }}
