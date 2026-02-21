@@ -69,9 +69,7 @@ async function main() {
         args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-infobars',
-            '--no-sandbox',
-            '--window-position=-32000,-32000', // Keeps window off-screen
-            '--window-size=1,1'
+            '--no-sandbox'
         ],
         viewport: null
     });
