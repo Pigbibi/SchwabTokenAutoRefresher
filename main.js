@@ -52,14 +52,19 @@ async function smartClick(page, targetName, selector = null, timeout = 10000) {
 
 async function updateAndCleanupSecrets(tokenData) {
     console.log("🔍 Initializing GCP Secret Manager...");
-    const client = new SecretManagerServiceClient({ projectId: PROJECT_ID });
+    let options = { projectId: PROJECT_ID };
+    if (process.env.GCP_SA_KEY) {
+        options.credentials = JSON.parse(process.env.GCP_SA_KEY);
+    }
+    
+    const client = new SecretManagerServiceClient(options);
     const parent = `projects/${PROJECT_ID}/secrets/${SECRET_ID}`;
     const payload = Buffer.from(JSON.stringify(tokenData), 'utf8');
     
-    const [newVersion] = await client.addSecretVersion({ parent, payload: { data: payload } });
+    const [newVersion] = await client.addSecretVersion({ parent: parent, payload: { data: payload } });
     console.log(`✅ Token Version ${newVersion.name.split('/').pop()} synced.`);
 
-    const [versions] = await client.listSecretVersions({ parent });
+    const [versions] = await client.listSecretVersions({ parent: parent });
     for (const v of versions) {
         if (v.name !== newVersion.name && v.state !== 'DESTROYED') {
             await client.destroySecretVersion({ name: v.name });
