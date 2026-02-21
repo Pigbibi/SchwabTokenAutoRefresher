@@ -6,7 +6,7 @@ const { TOTP } = require('otpauth');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const path = require('path');
 
-// --- Environment Configuration ---
+// --- Configuration ---
 const USERNAME = process.env.SCHWAB_USERNAME;
 const PASSWORD = process.env.SCHWAB_PASSWORD;
 const TOTP_SECRET = process.env.SCHWAB_TOTP_SECRET;
@@ -16,14 +16,11 @@ const PROJECT_ID = process.env.GCP_PROJECT_ID;
 const SECRET_ID = 'SCHWAB_TOKENS';
 const REDIRECT_URI = 'https://127.0.0.1:8182';
 
-/**
- * Helper: Random delay to mimic human behavior and bypass anti-bot filters.
- */
 const humanDelay = (min = 2000, max = 5000) => 
     new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (max - min) + min)));
 
 /**
- * GCP: Uploads the new token to Secret Manager and prunes old versions.
+ * GCP: Sync new token and prune old versions in Secret Manager.
  */
 async function updateSecrets(tokenData) {
     console.log("🔍 Initializing Google Cloud Secret Manager...");
@@ -38,14 +35,11 @@ async function updateSecrets(tokenData) {
     for (const v of versions) {
         if (v.name !== newVersion.name && v.state !== 'DESTROYED') {
             await client.destroySecretVersion({ name: v.name });
-            console.log(`🧹 Old version ${v.name.split('/').pop()} destroyed.`);
+            console.log(`🧹 Cleaned up old version: ${v.name.split('/').pop()}`);
         }
     }
 }
 
-/**
- * OAuth: Final step to exchange Authorization Code for Access/Refresh Tokens.
- */
 async function exchangeCodeForToken(code) {
     const credentials = Buffer.from(`${APP_KEY}:${APP_SECRET}`).toString('base64');
     const params = new URLSearchParams({
@@ -63,21 +57,20 @@ async function exchangeCodeForToken(code) {
 }
 
 async function main() {
-    console.log("🚀 Starting background OAuth automation task...");
+    console.log("🚀 Starting Schwab OAuth task...");
     const authUrl = `https://api.schwabapi.com/v1/oauth/authorize?client_id=${APP_KEY}&redirect_uri=${REDIRECT_URI}`;
     
-    // Persistent directory to store session cookies and "Trusted Device" tokens.
-    // Using absolute path to ensure stability in Service Mode.
+    // Using absolute path to ensure stability in Windows Service Mode.
     const userDataDir = path.resolve(__dirname, 'schwab-local-session'); 
 
     const context = await chromium.launchPersistentContext(userDataDir, {
-        headless: false, // Required false to bypass high-security WAF
-        channel: 'chrome', // Use the local Google Chrome installation
+        headless: false, // Must be false for Schwab's financial anti-bot systems
+        channel: 'chrome', 
         args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-infobars',
             '--no-sandbox',
-            '--window-position=-32000,-32000', // Physical off-screen positioning
+            '--window-position=-32000,-32000', // Keeps window off-screen
             '--window-size=1,1'
         ],
         viewport: null
@@ -86,11 +79,8 @@ async function main() {
     const page = context.pages()[0] || await context.newPage();
     let interceptedCode = null;
 
-    // Monitor network requests to capture the authorization code
     page.on('request', r => {
-        if (r.url().includes('code=')) {
-            interceptedCode = new URL(r.url()).searchParams.get('code');
-        }
+        if (r.url().includes('code=')) interceptedCode = new URL(r.url()).searchParams.get('code');
     });
 
     try {
@@ -98,29 +88,32 @@ async function main() {
         await page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await humanDelay(3000, 5000);
 
-        // Fill Login ID and Password
         console.log("⌨️ Entering credentials...");
         await page.getByRole('textbox', { name: 'Login ID' }).pressSequentially(USERNAME, { delay: 100 });
         await page.getByRole('textbox', { name: 'Password' }).pressSequentially(PASSWORD, { delay: 100 });
         await page.getByRole('button', { name: 'Log in' }).click();
 
-        // 2FA - Handles Security Code if prompted
+        // --- 🔐 4. Strict 2FA Handling ---
+        console.log("🔐 Checking for 2FA screen...");
         try {
             const codeInput = page.getByRole('spinbutton', { name: 'Security Code' });
             await codeInput.waitFor({ timeout: 15000 });
+            
             const token = new TOTP({ secret: TOTP_SECRET.replace(/\s/g, "") }).generate();
-            console.log(`👉 TOTP generated: ${token}`);
+            console.log(`👉 TOTP successfully generated: ${token}`);
+            
             await codeInput.pressSequentially(token, { delay: 150 });
             await page.getByRole('button', { name: 'Continue' }).click();
         } catch (e) {
-            wait page.screenshot({ path: 'fatal_2fa_missing.png', fullPage: true });
-            throw new Error("🚨 FATAL: 2FA input field not found! This could be due to an IP block, CAPTCHA, or incorrect credentials.");
+            await page.screenshot({ path: 'fatal_2fa_missing.png', fullPage: true });
+            throw new Error("🚨 FATAL: 2FA input field not found! Script stopped to protect account.");
         }
 
-        // Handle post-login authorization approvals
+        // --- 5. Approvals ---
+        console.log("✅ Handling authorization approvals...");
         await humanDelay(5000, 8000);
-        const approveLabels = ['Continue', 'Accept', 'Done'];
-        for (const label of approveLabels) {
+        const labels = ['Continue', 'Accept', 'Done'];
+        for (const label of labels) {
             try {
                 const btn = page.getByRole('button', { name: label, exact: false }).first();
                 if (await btn.isVisible({ timeout: 5000 })) {
@@ -130,31 +123,25 @@ async function main() {
             } catch (e) {}
         }
 
-        // Wait for redirection and code interception
-        for (let i = 0; i < 20 && !interceptedCode; i++) {
-            await page.waitForTimeout(1000);
-        }
+        // --- 6. Interception ---
+        for (let i = 0; i < 20 && !interceptedCode; i++) { await page.waitForTimeout(1000); }
+        if (!interceptedCode) throw new Error("❌ Error: Authorization code interception failed.");
 
-        if (!interceptedCode) throw new Error("❌ Critical Error: Failed to intercept authorization code.");
-
-        // Exchange code for new tokens
         const tokenDict = await exchangeCodeForToken(interceptedCode.replace('%40', '@'));
         tokenDict.expires_at = Math.floor(Date.now() / 1000) + tokenDict.expires_in;
         
-        // Sync results to GCP
         await updateSecrets({
             creation_timestamp: Math.floor(Date.now() / 1000),
             token: tokenDict
         });
 
-        console.log("🎉 SUCCESS: Refresh tokens successfully updated in GCP Secret Manager.");
+        console.log("🎉 SUCCESS: Refresh token lifecycle completed.");
 
     } catch (err) {
         console.error("🚨 Execution Failed:", err.message);
-        await page.screenshot({ path: 'service_error_debug.png' });
+        await page.screenshot({ path: 'last_error_state.png' });
         process.exit(1);
     } finally {
-        // Essential cleanup for Service Mode to prevent orphaned processes
         if (context) await context.close();
     }
 }
