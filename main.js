@@ -13,8 +13,8 @@ const TOTP_SECRET = process.env.SCHWAB_TOTP_SECRET;
 const APP_KEY = process.env.SCHWAB_API_KEY;
 const APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const PROJECT_ID = process.env.GCP_PROJECT_ID;
-const SECRET_ID = process.env.GCP_SECRET_ID || 'SCHWAB_TOKENS';
-const REDIRECT_URI = process.env.SCHWAB_REDIRECT_URI || 'https://127.0.0.1:8182';
+const SECRET_ID = process.env.GCP_SECRET_ID;
+const REDIRECT_URI = process.env.SCHWAB_REDIRECT_URI;
 
 const humanDelay = (min = 2000, max = 5000) => 
     new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (max - min) + min)));
@@ -95,7 +95,7 @@ async function main() {
     const context = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
         channel: 'chrome',
-        args: ['--disable-blink-features=AutomationControlled', '--disable-infobars', '--no-sandbox'],
+        args: ['--disable-blink-features=AutomationControlled', '--disable-infobars', '--no-sandbox', '--window-position=-32000,-32000', '--window-size=1,1'],
         viewport: null
     });
 
