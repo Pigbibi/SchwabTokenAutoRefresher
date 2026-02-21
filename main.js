@@ -98,17 +98,19 @@ async function main() {
     
     const browser = await chromium.launch({ 
         headless: false,
+        channel: 'msedge',
         args: [
             '--disable-blink-features=AutomationControlled',
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-infobars',
-            '--window-size=1920,1080'
+            '--window-size=1920,1080',
+            '--window-position=-32000,-32000'
         ]
     });
 
     const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
         viewport: { width: 1920, height: 1080 },
         locale: 'en-US',
         timezoneId: 'America/New_York',
