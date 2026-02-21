@@ -95,7 +95,7 @@ async function main() {
     const context = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
         channel: 'chrome',
-        args: ['--disable-blink-features=AutomationControlled', '--disable-infobars', '--no-sandbox', '--window-position=-32000,-32000', '--window-size=1,1'],
+        args: ['--disable-blink-features=AutomationControlled', '--disable-infobars', '--no-sandbox', '--window-position=-32000,-32000', '--window-size=1280,800'],
         viewport: null
     });
 
