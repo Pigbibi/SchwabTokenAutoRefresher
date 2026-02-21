@@ -100,16 +100,13 @@ async function main() {
 
     const context = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
-        channel: 'chrome', // 💡 改成了调用本地真实的 Google Chrome
+        channel: 'chrome',
         args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-infobars'
         ],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-        viewport: null, 
-        deviceScaleFactor: 1,
-        hasTouch: false,
-        isMobile: false,
+        viewport: null,
         permissions: ['geolocation']
     });
 
