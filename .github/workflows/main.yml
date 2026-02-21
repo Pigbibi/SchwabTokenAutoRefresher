@@ -43,6 +43,8 @@ jobs:
           SCHWAB_API_KEY: ${{ secrets.SCHWAB_API_KEY }}
           SCHWAB_APP_SECRET: ${{ secrets.SCHWAB_APP_SECRET }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_SECRET_ID: ${{ secrets.GCP_SECRET_ID }}
+          SCHWAB_REDIRECT_URI: ${{ secrets.SCHWAB_REDIRECT_URI }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_config_file }}
 
       - name: Upload Error Screenshot
