@@ -27,9 +27,6 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps chromium
-
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2
@@ -46,6 +43,7 @@ jobs:
           SCHWAB_API_KEY: ${{ secrets.SCHWAB_API_KEY }}
           SCHWAB_APP_SECRET: ${{ secrets.SCHWAB_APP_SECRET }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          ADS_USER_ID: ${{ secrets.ADS_USER_ID }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_config_file }}
 
       - name: Upload Error Screenshot
