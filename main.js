@@ -96,24 +96,17 @@ async function main() {
     console.log("🚀 Starting OAuth automation task...");
     const authUrl = `https://api.schwabapi.com/v1/oauth/authorize?client_id=${APP_KEY}&redirect_uri=${REDIRECT_URI}`;
     
-    const browser = await chromium.launch({ 
+    const userDataDir = './schwab-chrome-session'; 
+
+    const context = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
-        channel: 'msedge',
+        channel: 'chrome', // 💡 改成了调用本地真实的 Google Chrome
         args: [
             '--disable-blink-features=AutomationControlled',
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-infobars',
-            '--window-size=1920,1080',
-            '--window-position=-32000,-32000'
-        ]
-    });
-
-    const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-        viewport: { width: 1920, height: 1080 },
-        locale: 'en-US',
-        timezoneId: 'America/New_York',
+            '--disable-infobars'
+        ],
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+        viewport: null, 
         deviceScaleFactor: 1,
         hasTouch: false,
         isMobile: false,
@@ -123,11 +116,9 @@ async function main() {
     await context.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         window.navigator.chrome = { runtime: {} };
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     });
 
-    const page = await context.newPage();
+    const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
 
     let interceptedCode = null;
     page.on('request', request => {
