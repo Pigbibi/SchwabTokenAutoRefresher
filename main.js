@@ -125,6 +125,8 @@ async function main() {
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     });
 
+    const page = await context.newPage();
+
     let interceptedCode = null;
     page.on('request', request => {
         const url = request.url();
