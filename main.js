@@ -36,7 +36,7 @@ async function smartClick(page, targetName, selector = null, timeout = 10000) {
         return true;
     } catch (e) {
         console.log(`🔍 Target [${targetName}] not found on primary path, initiating smart keyword search...`);
-        const backupLabels = ['Accept', 'Continue', 'Done', 'Agree', 'Log in'];
+        const backupLabels = ['Accept', 'Continue', 'Done', 'Agree'];
         for (const label of backupLabels) {
             const backupBtn = page.getByRole('button', { name: label, exact: false }).first();
             if (await backupBtn.isVisible()) {
@@ -97,16 +97,33 @@ async function main() {
     const authUrl = `https://api.schwabapi.com/v1/oauth/authorize?client_id=${APP_KEY}&redirect_uri=${REDIRECT_URI}`;
     
     const browser = await chromium.launch({ 
-        headless: true,
+        headless: false,
         args: [
             '--disable-blink-features=AutomationControlled',
             '--no-sandbox',
-            '--disable-setuid-sandbox'
+            '--disable-setuid-sandbox',
+            '--disable-infobars',
+            '--window-size=1920,1080'
         ]
     });
 
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        viewport: { width: 1920, height: 1080 },
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+        deviceScaleFactor: 1,
+        hasTouch: false,
+        isMobile: false,
+        permissions: ['geolocation']
+    });
+
+    await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        window.navigator.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    });
 
     let interceptedCode = null;
     page.on('request', request => {
@@ -151,7 +168,9 @@ async function main() {
             await humanDelay(1000, 2000);
             await page.getByRole('button', { name: 'Continue' }).click();
         } catch (e) {
-            console.log("ℹ️ 2FA skipped...");
+            console.error("🚨 Fatal Error: 2FA input field not found! Likely blocked by anti-bot systems or page load timed out.");
+            await page.screenshot({ path: '2fa_failed_screenshot.png', fullPage: true });
+            throw new Error("2FA Phase Failed - Script stopped to prevent wrong clicks.");
         }
 
         console.log("✅ 4. Executing account authorization checkbox and smart clicks...");
