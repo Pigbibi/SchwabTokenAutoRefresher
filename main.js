@@ -15,13 +15,18 @@ const PROJECT_ID = process.env.GCP_PROJECT_ID;
 const SECRET_ID = 'SCHWAB_TOKENS';
 const REDIRECT_URI = 'https://127.0.0.1:8182';
 
-// Human-like random delay function
+// --- AdsPower Configuration ---
+const ADS_USER_ID = process.env.ADS_USER_ID; // The Unique ID from AdsPower
+const ADS_API_BASE = 'http://127.0.0.1:50325'; // Default AdsPower Local Service port
+
+/**
+ * Helper: Human-like random delay
+ */
 const humanDelay = (min = 2000, max = 5000) => 
     new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (max - min) + min)));
 
 /**
- * 💡 Smart-fallback click helper:
- * Prioritizes clicking the recorded ID/role. If not found, automatically seeks keyword-based buttons.
+ * Helper: Smart-fallback clicker to handle UI changes
  */
 async function smartClick(page, targetName, selector = null, timeout = 10000) {
     try {
@@ -35,22 +40,25 @@ async function smartClick(page, targetName, selector = null, timeout = 10000) {
         console.log(`✅ Successfully clicked target button: ${targetName}`);
         return true;
     } catch (e) {
-        console.log(`🔍 Target [${targetName}] not found on primary path, initiating smart keyword search...`);
+        console.log(`🔍 Target [${targetName}] not found, initiating smart fallback...`);
         const backupLabels = ['Accept', 'Continue', 'Done', 'Agree'];
         for (const label of backupLabels) {
             const backupBtn = page.getByRole('button', { name: label, exact: false }).first();
             if (await backupBtn.isVisible()) {
-                console.log(`✨ Smart-fallback successful, found and clicked: ${label}`);
+                console.log(`✨ Smart-fallback successful: ${label}`);
                 await backupBtn.hover();
                 await backupBtn.click({ delay: Math.random() * 200 + 100 });
                 return true;
             }
         }
-        console.warn(`⚠️ Smart search found no clickable targets, skipping this step.`);
+        console.warn(`⚠️ No clickable targets found, skipping.`);
         return false;
     }
 }
 
+/**
+ * GCP: Update Secret Manager and destroy old versions
+ */
 async function updateAndCleanupSecrets(tokenData) {
     console.log("🔍 Initializing GCP Secret Manager...");
     let options = { projectId: PROJECT_ID };
@@ -65,7 +73,7 @@ async function updateAndCleanupSecrets(tokenData) {
         parent: parent,
         payload: { data: payload }
     });
-    console.log(`✅ New Token synced successfully! Version: ${newVersion.name.split('/').pop()}`);
+    console.log(`✅ New Token synced! Version: ${newVersion.name.split('/').pop()}`);
 
     const [versions] = await client.listSecretVersions({ parent: parent });
     for (const version of versions) {
@@ -76,6 +84,9 @@ async function updateAndCleanupSecrets(tokenData) {
     }
 }
 
+/**
+ * OAuth: Exchange Auth Code for Access/Refresh Tokens
+ */
 async function exchangeCodeForToken(code) {
     const credentials = Buffer.from(`${APP_KEY}:${APP_SECRET}`).toString('base64');
     const params = new URLSearchParams({
@@ -93,129 +104,105 @@ async function exchangeCodeForToken(code) {
 }
 
 async function main() {
-    console.log("🚀 Starting OAuth automation task...");
+    console.log("🚀 Starting OAuth automation via AdsPower...");
     const authUrl = `https://api.schwabapi.com/v1/oauth/authorize?client_id=${APP_KEY}&redirect_uri=${REDIRECT_URI}`;
     
-    const userDataDir = './schwab-chrome-session'; 
-
-    const context = await chromium.launchPersistentContext(userDataDir, {
-        headless: false,
-        channel: 'chrome',
-        args: [
-            '--disable-blink-features=AutomationControlled',
-            '--disable-infobars',
-            '--window-position=-32000,-32000'
-        ],
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-        viewport: null,
-        permissions: ['geolocation']
-    });
-
-    await context.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        window.navigator.chrome = { runtime: {} };
-    });
-
-    const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
-
-    let interceptedCode = null;
-    page.on('request', request => {
-        const url = request.url();
-        if (url.includes('code=')) {
-            const urlObj = new URL(url);
-            const code = urlObj.searchParams.get('code');
-            if (code) interceptedCode = code;
-        }
-    });
-
+    let browser;
     try {
-        console.log("🌐 1. Navigating to authorization page...");
+        // 1. Start AdsPower Browser via Local API
+        console.log(`📡 Requesting AdsPower to start profile: ${ADS_USER_ID}`);
+        const startResult = await axios.get(`${ADS_API_BASE}/api/v1/browser/start?user_id=${ADS_USER_ID}&open_tabs=1`);
+        
+        if (startResult.data.code !== 0) {
+            throw new Error(`AdsPower failed: ${startResult.data.msg}`);
+        }
+
+        // 2. Connect Playwright to the AdsPower instance via CDP
+        const wsEndpoint = startResult.data.data.ws.puppeteer;
+        browser = await chromium.connectOverCDP(wsEndpoint);
+        const context = browser.contexts()[0];
+        const page = context.pages()[0] || await context.newPage();
+
+        let interceptedCode = null;
+        page.on('request', request => {
+            const url = request.url();
+            if (url.includes('code=')) {
+                const code = new URL(url).searchParams.get('code');
+                if (code) interceptedCode = code;
+            }
+        });
+
+        // 3. Navigation
+        console.log("🌐 Navigating to authorization page...");
         await page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await humanDelay(3000, 5000);
 
-        console.log("⌨️ 2. Entering credentials with human-like typing...");
+        // 4. Login
+        console.log("⌨️ Entering credentials...");
         const loginInput = page.getByRole('textbox', { name: 'Login ID' });
-        await loginInput.click();
-        await loginInput.pressSequentially(USERNAME, { delay: 150 + Math.random() * 100 });
-        await humanDelay(1000, 2000);
-
+        await loginInput.pressSequentially(USERNAME, { delay: 100 });
+        
         const pwdInput = page.getByRole('textbox', { name: 'Password' });
-        await pwdInput.click();
-        await pwdInput.pressSequentially(PASSWORD, { delay: 150 + Math.random() * 100 });
-        await humanDelay(1500, 3000);
-
+        await pwdInput.pressSequentially(PASSWORD, { delay: 100 });
         await page.getByRole('button', { name: 'Log in' }).click();
 
-        console.log("🔐 3. Processing 2FA code...");
+        // 5. 2FA Handling
+        console.log("🔐 Processing 2FA...");
         try {
             const codeInput = page.getByRole('spinbutton', { name: 'Security Code' });
             await codeInput.waitFor({ timeout: 15000 });
-            await humanDelay(3000, 5000); 
-
+            
             const totp = new TOTP({ secret: TOTP_SECRET.replace(/\s/g, "") });
             const token = totp.generate();
-            console.log(`   👉 Generated TOTP: ${token}`);
+            console.log(`👉 Generated TOTP: ${token}`);
             
-            await codeInput.click();
-            await codeInput.pressSequentially(token, { delay: 200 });
-            await humanDelay(1000, 2000);
+            await codeInput.pressSequentially(token, { delay: 150 });
             await page.getByRole('button', { name: 'Continue' }).click();
         } catch (e) {
-            console.error("🚨 Fatal Error: 2FA input field not found! Likely blocked by anti-bot systems or page load timed out.");
-            await page.screenshot({ path: '2fa_failed_screenshot.png', fullPage: true });
-            throw new Error("2FA Phase Failed - Script stopped to prevent wrong clicks.");
+            console.error("🚨 2FA Error: Input field not found. Check for CAPTCHA or blocked IP.");
+            await page.screenshot({ path: '2fa_error.png' });
+            throw new Error("2FA Failed");
         }
 
-        console.log("✅ 4. Executing account authorization checkbox and smart clicks...");
-        await humanDelay(3000, 6000);
-
+        // 6. Authorization Clicks
+        console.log("✅ Finalizing authorization clicks...");
+        await humanDelay(4000, 7000);
+        
         try {
             const cb = page.getByRole('checkbox', { name: 'By checking this box, I' });
-            if (await cb.isVisible({ timeout: 5000 })) {
-                await cb.check();
-                await humanDelay(500, 1500);
-            }
+            if (await cb.isVisible({ timeout: 5000 })) await cb.check();
         } catch(e) {}
 
-        await smartClick(page, 'Continue', '#submit-btn');
-        await humanDelay(2000, 4000);
-
-        await smartClick(page, 'Accept');
-        await humanDelay(2000, 4000);
-
         await smartClick(page, 'Continue');
-        await humanDelay(2000, 4000);
-
+        await smartClick(page, 'Accept');
+        await smartClick(page, 'Continue');
         await smartClick(page, 'Done');
 
-        console.log("🔄 5. Intercepting and syncing Code...");
-        for (let i = 0; i < 25; i++) {
+        // 7. Token Sync
+        console.log("🔄 Intercepting Code...");
+        for (let i = 0; i < 20; i++) {
             if (interceptedCode) break;
-            const currentUrl = page.url();
-            if (currentUrl.includes('code=')) {
-                interceptedCode = new URL(currentUrl).searchParams.get('code');
-                break;
-            }
             await page.waitForTimeout(1000);
         }
 
         if (!interceptedCode) throw new Error("❌ Failed to intercept Code");
 
-        const tokenDict = await exchangeCodeForToken(interceptedCode.replace('%40', '@'));
-        tokenDict.expires_at = Math.floor(Date.now() / 1000) + tokenDict.expires_in;
+        const tokenData = await exchangeCodeForToken(interceptedCode.replace('%40', '@'));
+        tokenData.expires_at = Math.floor(Date.now() / 1000) + tokenData.expires_in;
+        
         await updateAndCleanupSecrets({
             creation_timestamp: Math.floor(Date.now() / 1000),
-            token: tokenDict
+            token: tokenData
         });
-        console.log("🎉 OAuth automation task completed!");
+
+        console.log("🎉 Task completed successfully!");
 
     } catch (error) {
-        console.error("🚨 System crashed...");
-        await page.screenshot({ path: 'error_screenshot.png', fullPage: true });
-        console.error(error.stack);
+        console.error("🚨 System Crash:", error.message);
         process.exit(1);
     } finally {
-        if (context) await context.close();
+        if (browser) await browser.close();
+        await axios.get(`${ADS_API_BASE}/api/v1/browser/stop?user_id=${ADS_USER_ID}`);
     }
 }
 
