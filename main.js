@@ -103,7 +103,8 @@ async function main() {
         channel: 'chrome',
         args: [
             '--disable-blink-features=AutomationControlled',
-            '--disable-infobars'
+            '--disable-infobars',
+            '--window-position=-32000,-32000'
         ],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         viewport: null,
@@ -214,7 +215,7 @@ async function main() {
         console.error(error.stack);
         process.exit(1);
     } finally {
-        await browser.close();
+        if (context) await context.close();
     }
 }
 
