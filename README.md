@@ -6,49 +6,48 @@
 
 An automated utility designed to bypass the 7-day expiration of Charles Schwab API Refresh Tokens. By leveraging a self-hosted environment and persistent browser contexts, it automates the OAuth consent flow and synchronizes credentials directly to Google Cloud Secret Manager.
 
-## Features
+## 🚀 Features
 
-- **Service-Mode Stealth**: Optimized for Windows Service (Session 0). Runs completely in the background with zero UI interference.
-- **Trusted Device Persistence**: Utilizes local Chrome profiles to maintain "Trusted Device" status, significantly reducing MFA frequency.
-- **Smart-Heuristic Automation**: Dynamically identifies and interacts with Terms & Conditions checkboxes and authorization buttons.
-- **Secure Cloud Sync**: Injects tokens directly into GCP Secret Manager via memory using Service Account keys.
-- **Invisible Execution**: Implements off-screen window positioning (-32000, -32000) for non-disruptive automation.
+- **Service-Mode Stealth**: Optimized for Windows Service (Session 0). Runs in the background with zero UI interference.
+- **Trusted Device Persistence**: Utilizes local Chrome profiles to maintain "Trusted Device" status, reducing MFA frequency.
+- **Secure Cloud Sync**: Injects tokens directly into GCP Secret Manager via memory.
+- **Isolated Logging**: Success logs are automatically pushed to a dedicated `logs` branch to keep the main codebase clean.
 
-## Prerequisites
+## 🛠 Setup & Installation (For Forkers)
 
-- **Environment**: Windows 10/11 (Self-hosted Runner recommended).
-- **Browser**: Google Chrome (Latest stable version).
-- **Runtime**: Node.js v20 or higher.
-- **Cloud**: Google Cloud Project with Secret Manager API enabled.
+If you have forked this repository, follow these steps to enable the automation:
 
-## Setup & Installation
-
-### 1. Local Environment
-Clone the repository and install dependencies:
-1. git clone https://github.com/Pigbibi/SchwabTokenAutoRefresher.git
-2. cd SchwabTokenAutoRefresher
-3. npm install
+### 1. Environment Requirements
+- **Self-hosted Runner**: A Windows 10/11 machine (required for persistent Chrome profile and "Trusted Device" status).
+- **Chrome Browser**: Latest stable version installed.
+- **GCP Setup**: A Google Cloud Project with **Secret Manager API** enabled and a Service Account with `Secret Manager Secret Accessor/Version Adder` roles.
 
 ### 2. Configure GitHub Secrets
-Navigate to Settings > Secrets > Actions and configure the following:
-- SCHWAB_USERNAME / SCHWAB_PASSWORD: Account credentials.
-- SCHWAB_TOTP_SECRET: 2FA secret key.
-- SCHWAB_API_KEY / SCHWAB_APP_SECRET: Schwab Developer App credentials.
-- GCP_PROJECT_ID / GCP_SA_KEY: Google Cloud credentials.
-- GCP_SECRET_ID / SCHWAB_REDIRECT_URI: Configuration for Secret Manager and OAuth.
+Go to **Settings > Secrets and variables > Actions** in your forked repo and add:
+- `SCHWAB_USERNAME` / `SCHWAB_PASSWORD`: Your Schwab login credentials.
+- `SCHWAB_TOTP_SECRET`: Your 2FA/MFA secret key.
+- `SCHWAB_API_KEY` / `SCHWAB_APP_SECRET`: From your Schwab Developer App.
+- `GCP_PROJECT_ID`: Your Google Cloud Project ID.
+- `GCP_SA_KEY`: The JSON key of your GCP Service Account.
+- `GCP_SECRET_ID`: The name of the secret in Secret Manager.
+- `SCHWAB_REDIRECT_URI`: Your App's redirect URI.
 
-### 3. Deploy as a Service
-When configuring the GitHub Actions Runner, ensure you select "Y" for the "Install as Service" prompt. This ensures the script runs invisibly in the background.
+### 3. Deploy the Runner
+1. Download the GitHub Actions Runner on your Windows machine.
+2. During configuration, when prompted `Enter the name of the runner`, give it a unique name.
+3. **Crucial**: When asked `Should the runner be run as a service?`, enter **Y**.
 
-## Architecture
+### 4. Enable the Workflow
+1. Go to the **Actions** tab of your repository.
+2. Select **Schwab Token Auto Refresher** on the left.
+3. Click **Enable workflow** (GitHub disables scheduled workflows on forked repos by default).
+4. Manually trigger it once using **Run workflow** to test the connection.
 
-1. **Trigger**: GitHub Actions scheduler (Cron: 0 13 */3 * *).
-2. **Execution**: Local Runner invokes Playwright with the system's Chrome channel.
-3. **Persistence**: Session data is stored in ./schwab-local-session to bypass repetitive security checks.
-4. **Sync**: Refreshed tokens are pushed to GCP Secret Manager; execution logs are updated in last_run.txt.
+## 📈 Architecture
 
-## Disclaimer
-This project is for educational and personal use only. Use at your own risk. The author is not responsible for any account-related issues or financial losses.
+1. **Trigger**: GitHub Actions scheduler (Every 3 days at 13:00 UTC).
+2. **Persistence**: Session data is stored in `./schwab-local-session` to bypass repetitive security checks.
+3. **Sync**: Refreshed tokens are pushed to GCP; status is logged to the `logs` branch.
 
-## License
-Distributed under the MIT License. See LICENSE for more information.
+## 📄 License
+Distributed under the MIT License. See `LICENSE` for more information.
