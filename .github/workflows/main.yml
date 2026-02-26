@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true 
+          fetch-depth: 0 
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -55,7 +56,7 @@ jobs:
           path: '*.png'
           retention-days: 3
 
-      - name: Update Log and Push
+      - name: Update Log and Push to Logs Branch
         if: success()
         shell: powershell
         run: |
@@ -63,24 +64,27 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # 2. Update the log file
+          # 2. Get current time
           $dateStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          "Last successful refresh: $dateStr" | Out-File -FilePath last_run.txt -Encoding utf8
+          $logContent = "Last successful refresh: $dateStr"
+          
+          # 3. Clean up current branch (Stop tracking the log file if it exists)
+          if (Test-Path "last_run.txt") {
+              git rm --cached last_run.txt
+              git commit -m "chore: remove last_run.txt from main tracking [skip ci]"
+          }
+
+          # 4. Switch to (or create) the logs branch
+          # Using -B to reset the branch for clean history
+          git checkout -B logs
+
+          # 5. Update the log file on logs branch
+          $logContent | Out-File -FilePath last_run.txt -Encoding utf8
           git add last_run.txt
           
-          # 3. Check for changes and commit
-          $status = git status --porcelain
-          if ($status) {
-              Write-Host "Changes detected, committing..."
-              git commit -m "chore: auto-update login log [skip ci]"
-              
-              Write-Host "Pulling latest changes from remote..."
-              $remoteUrl = "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-              git pull --rebase $remoteUrl ${{ github.ref_name }}
-              
-              # 4. Push changes
-              Write-Host "Pushing to remote..."
-              git push $remoteUrl HEAD:${{ github.ref_name }}
-          } else {
-              Write-Host "No changes to commit"
-          }
+          # 6. Commit and Force Push to the logs branch
+          git commit -m "chore: update token refresh log to logs branch [skip ci]"
+          
+          $remoteUrl = "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          Write-Host "Pushing update to logs branch..."
+          git push $remoteUrl logs --force
