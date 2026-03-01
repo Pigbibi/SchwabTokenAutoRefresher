@@ -80,12 +80,13 @@ async function main() {
     const userDataDir = path.resolve(__dirname, 'schwab-local-session'); 
 
     const context = await firefox.launchPersistentContext(userDataDir, {
+        executablePath: '/usr/bin/firefox', 
         headless: false,
         args: ['--width=1280', '--height=800'],
         firefoxUserPrefs: {
             'dom.webdriver.enabled': false,
             'useAutomationExtension': false,
-            'browser.cache.disk.enable': false
+            'marionette.enabled': true,
         },
         viewport: { width: 1280, height: 800 }
     });
