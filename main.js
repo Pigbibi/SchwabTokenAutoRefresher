@@ -89,9 +89,8 @@ async function main() {
 
     try {
         console.log("🌐 1. Navigating to auth page...");
-        await page.goto(authUrl, { waitUntil: 'networkidle', timeout: 60000 });
+        await page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await humanDelay(3000, 5000);
-
         console.log("⌨️ 2. Entering credentials...");
         await page.getByRole('textbox', { name: 'Login ID' }).fill(USERNAME);
         await page.getByRole('textbox', { name: 'Password' }).fill(PASSWORD);
