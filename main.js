@@ -80,13 +80,25 @@ async function main() {
     const userDataDir = path.resolve(__dirname, 'schwab-local-session'); 
 
     const context = await firefox.launchPersistentContext(userDataDir, {
-        executablePath: '/usr/bin/firefox', 
+        executablePath: '/usr/bin/firefox',
         headless: false,
-        args: ['--width=1280', '--height=800'],
+        env: {
+            ...process.env,
+            DISPLAY: ':1', 
+            MOZ_FORCE_DISABLE_E10S: '1'
+        },
+        args: [
+            '--width=1280',
+            '--height=800',
+            '--no-remote'
+        ],
         firefoxUserPrefs: {
-            'dom.webdriver.enabled': false,
-            'useAutomationExtension': false,
-            'marionette.enabled': true,
+            'browser.tabs.remote.autostart': false, 
+            'browser.cache.disk.enable': false, 
+            'browser.cache.memory.enable': true, 
+            'browser.cache.memory.capacity': 102400,
+            'javascript.options.mem.max_old_space_size': 256, 
+            'image.mem.surfacecache_max_size_kb': 10240,
         },
         viewport: { width: 1280, height: 800 }
     });
