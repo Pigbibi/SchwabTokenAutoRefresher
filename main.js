@@ -1,6 +1,7 @@
-const { chromium } = require('playwright-extra');
+const { firefox } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
-chromium.use(stealth);
+firefox.use(stealth);
+
 const axios = require('axios');
 const { TOTP } = require('otpauth');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
@@ -34,18 +35,15 @@ async function smartClick(page, targetName, selector = null, timeout = 10000) {
         console.log(`✅ Successfully clicked target button: ${targetName}`);
         return true;
     } catch (e) {
-        console.log(`🔍 Target [${targetName}] not found on primary path, initiating smart keyword search...`);
+        console.log(`🔍 Target [${targetName}] not found, using smart-fallback...`);
         const backupLabels = ['Accept', 'Continue', 'Done', 'Agree'];
         for (const label of backupLabels) {
             const backupBtn = page.getByRole('button', { name: label, exact: false }).first();
             if (await backupBtn.isVisible()) {
-                console.log(`✨ Smart-fallback successful, found and clicked: ${label}`);
-                await backupBtn.hover();
                 await backupBtn.click({ delay: Math.random() * 200 + 100 });
                 return true;
             }
         }
-        console.warn(`⚠️ Smart search found no clickable targets, skipping this step.`);
         return false;
     }
 }
@@ -53,50 +51,43 @@ async function smartClick(page, targetName, selector = null, timeout = 10000) {
 async function updateAndCleanupSecrets(tokenData) {
     console.log("🔍 Initializing GCP Secret Manager...");
     let options = { projectId: PROJECT_ID };
-    if (process.env.GCP_SA_KEY) {
-        options.credentials = JSON.parse(process.env.GCP_SA_KEY);
-    }
-    
+    if (process.env.GCP_SA_KEY) { options.credentials = JSON.parse(process.env.GCP_SA_KEY); }
     const client = new SecretManagerServiceClient(options);
     const parent = `projects/${PROJECT_ID}/secrets/${SECRET_ID}`;
     const payload = Buffer.from(JSON.stringify(tokenData), 'utf8');
-    
-    const [newVersion] = await client.addSecretVersion({ parent: parent, payload: { data: payload } });
+    const [newVersion] = await client.addSecretVersion({ parent, payload: { data: payload } });
     console.log(`✅ Token Version ${newVersion.name.split('/').pop()} synced.`);
-
-    const [versions] = await client.listSecretVersions({ parent: parent });
+    const [versions] = await client.listSecretVersions({ parent });
     for (const v of versions) {
         if (v.name !== newVersion.name && v.state !== 'DESTROYED') {
             await client.destroySecretVersion({ name: v.name });
-            console.log(`🧹 Pruned old version: ${v.name.split('/').pop()}`);
         }
     }
 }
 
 async function exchangeCodeForToken(code) {
     const credentials = Buffer.from(`${APP_KEY}:${APP_SECRET}`).toString('base64');
-    const params = new URLSearchParams({
-        grant_type: 'authorization_code', code, redirect_uri: REDIRECT_URI
-    });
+    const params = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: REDIRECT_URI });
     const response = await axios.post('https://api.schwabapi.com/v1/oauth/token', params.toString(), {
-        headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        headers: { 'Authorization': `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' }
     });
     return response.data;
 }
 
 async function main() {
-    console.log("🚀 Starting secure background OAuth task...");
+    console.log("🚀 Starting Firefox OAuth task on Ubuntu...");
     const authUrl = `https://api.schwabapi.com/v1/oauth/authorize?client_id=${APP_KEY}&redirect_uri=${REDIRECT_URI}`;
     const userDataDir = path.resolve(__dirname, 'schwab-local-session'); 
 
-    const context = await chromium.launchPersistentContext(userDataDir, {
+    const context = await firefox.launchPersistentContext(userDataDir, {
         headless: false,
-        channel: 'chrome',
-        args: ['--disable-blink-features=AutomationControlled', '--disable-infobars', '--no-sandbox', '--window-position=-32000,-32000', '--window-size=1280,800'],
-        viewport: null
+        args: ['--width=1280', '--height=800'],
+        firefoxUserPrefs: {
+            'dom.webdriver.enabled': false,
+            'useAutomationExtension': false,
+            'browser.cache.disk.enable': false
+        },
+        viewport: { width: 1280, height: 800 }
     });
 
     const page = context.pages()[0] || await context.newPage();
@@ -112,66 +103,54 @@ async function main() {
         await humanDelay(3000, 5000);
 
         console.log("⌨️ 2. Entering credentials...");
-        await page.getByRole('textbox', { name: 'Login ID' }).pressSequentially(USERNAME, { delay: 100 });
-        await page.getByRole('textbox', { name: 'Password' }).pressSequentially(PASSWORD, { delay: 100 });
+        await page.getByRole('textbox', { name: 'Login ID' }).fill(USERNAME);
+        await page.getByRole('textbox', { name: 'Password' }).fill(PASSWORD);
         await page.getByRole('button', { name: 'Log in' }).click();
 
         console.log("🔐 3. Processing 2FA code...");
         try {
             const codeInput = page.getByRole('spinbutton', { name: 'Security Code' });
-            await codeInput.waitFor({ timeout: 15000 });
+            await codeInput.waitFor({ timeout: 20000 });
             const token = new TOTP({ secret: TOTP_SECRET.replace(/\s/g, "") }).generate();
             console.log(`👉 Generated TOTP: ${token}`);
-            await codeInput.pressSequentially(token, { delay: 150 });
+            await codeInput.fill(token);
             await page.getByRole('button', { name: 'Continue' }).click();
         } catch (e) {
-            await page.screenshot({ path: 'fatal_2fa_missing.png', fullPage: true });
-            throw new Error("🚨 FATAL: 2FA input field not found! Stopping to prevent wrong clicks.");
+            await page.screenshot({ path: 'fatal_2fa_missing.png' });
+            throw new Error("🚨 2FA Input not found.");
         }
 
-        console.log("✅ 4. Executing account authorization checkbox and smart clicks...");
-        await humanDelay(5000, 8000);
+        console.log("✅ 4. Authorizing...");
+        await humanDelay(6000, 10000);
 
         try {
             const cb = page.getByRole('checkbox', { name: /By checking this box/i });
-            if (await cb.isVisible({ timeout: 5000 })) {
-                console.log("🎯 Checking mandatory terms box...");
-                await cb.check();
-                await humanDelay(1000, 2000);
-            }
-        } catch (e) {
-            console.log("🔍 Terms checkbox not found, skipping...");
-        }
+            if (await cb.isVisible({ timeout: 5000 })) { await cb.check(); }
+        } catch (e) {}
 
         await smartClick(page, 'Continue', '#submit-btn');
-        await humanDelay(2000, 4000);
-
+        await humanDelay(3000, 5000);
         await smartClick(page, 'Accept');
-        await humanDelay(2000, 4000);
-
+        await humanDelay(3000, 5000);
         await smartClick(page, 'Continue');
-        await humanDelay(2000, 4000);
-
+        await humanDelay(3000, 5000);
         await smartClick(page, 'Done');
 
-        console.log("🔄 5. Intercepting and syncing Code...");
-        for (let i = 0; i < 20 && !interceptedCode; i++) { await page.waitForTimeout(1000); }
-
-        if (!interceptedCode) throw new Error("❌ Error: Interception failed.");
+        console.log("🔄 5. Intercepting Code...");
+        for (let i = 0; i < 30 && !interceptedCode; i++) { await page.waitForTimeout(1000); }
+        if (!interceptedCode) throw new Error("❌ Interception failed.");
 
         const tokenDict = await exchangeCodeForToken(interceptedCode.replace('%40', '@'));
         tokenDict.expires_at = Math.floor(Date.now() / 1000) + tokenDict.expires_in;
-        
         await updateAndCleanupSecrets({ creation_timestamp: Math.floor(Date.now() / 1000), token: tokenDict });
-        console.log("🎉 SUCCESS: Refresh token lifecycle completed.");
+        console.log("🎉 SUCCESS!");
 
     } catch (err) {
-        console.error("🚨 Task Failure:", err.message);
+        console.error("🚨 Failure:", err.message);
         await page.screenshot({ path: 'last_error_state.png' });
         process.exit(1);
     } finally {
-        if (context) await context.close();
+        await context.close();
     }
 }
-
 main();

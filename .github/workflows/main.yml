@@ -2,22 +2,16 @@ name: Schwab Token Auto Refresher
 
 on:
   schedule:
-    # Runs every 3 days at 21:00 Beijing Time (13:00 UTC)
     - cron: '0 13 */3 * *'
   workflow_dispatch: 
-
-permissions:
-  contents: write
 
 jobs:
   refresh-token:
     runs-on: self-hosted
-    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          persist-credentials: true 
           fetch-depth: 0 
 
       - name: Setup Node.js
@@ -25,14 +19,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Install Dependencies & Firefox
+        run: |
+          npm install
+          npx playwright install firefox
+          npx playwright install-deps firefox
 
       - name: Run Refresh Script
         run: npm start
@@ -46,7 +37,6 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_SECRET_ID: ${{ secrets.GCP_SECRET_ID }}
           SCHWAB_REDIRECT_URI: ${{ secrets.SCHWAB_REDIRECT_URI }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_config_file }}
 
       - name: Upload Error Screenshot
         if: failure()
@@ -54,37 +44,16 @@ jobs:
         with:
           name: debug-screenshots
           path: '*.png'
-          retention-days: 3
 
-      - name: Update Log and Push to Logs Branch
+      - name: Update Log (Bash Version)
         if: success()
-        shell: powershell
         run: |
-          # 1. Basic Git Configuration
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # 2. Get current time
-          $dateStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          $logContent = "Last successful refresh: $dateStr"
+          echo "Last successful refresh: $(date '+%Y-%m-%d %H:%M:%S')" > last_run.txt
           
-          # 3. Clean up current branch (Stop tracking the log file if it exists)
-          if (Test-Path "last_run.txt") {
-              git rm --cached last_run.txt
-              git commit -m "chore: remove last_run.txt from main tracking [skip ci]"
-          }
-
-          # 4. Switch to (or create) the logs branch
-          # Using -B to reset the branch for clean history
           git checkout -B logs
-
-          # 5. Update the log file on logs branch
-          $logContent | Out-File -FilePath last_run.txt -Encoding utf8
           git add last_run.txt
-          
-          # 6. Commit and Force Push to the logs branch
-          git commit -m "chore: update token refresh log to logs branch [skip ci]"
-          
-          $remoteUrl = "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          Write-Host "Pushing update to logs branch..."
-          git push $remoteUrl logs --force
+          git commit -m "chore: update token refresh log [skip ci]"
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" logs --force
