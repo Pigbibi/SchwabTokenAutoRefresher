@@ -1,6 +1,6 @@
-const { firefox } = require('playwright-extra');
+const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
-firefox.use(stealth);
+chromium.use(stealth);
 
 const axios = require('axios');
 const { TOTP } = require('otpauth');
@@ -27,15 +27,11 @@ async function smartClick(page, targetName, selector = null, timeout = 10000) {
     try {
         console.log(`🎯 Attempting to find target button: ${targetName}`);
         let target = selector ? page.locator(selector) : page.getByRole('button', { name: targetName, exact: false });
-        
         await target.waitFor({ state: 'visible', timeout });
-        await target.hover(); 
-        await page.waitForTimeout(500);
         await target.click({ delay: Math.random() * 200 + 100 });
-        console.log(`✅ Successfully clicked target button: ${targetName}`);
+        console.log(`✅ Clicked: ${targetName}`);
         return true;
     } catch (e) {
-        console.log(`🔍 Target [${targetName}] not found, using smart-fallback...`);
         const backupLabels = ['Accept', 'Continue', 'Done', 'Agree'];
         for (const label of backupLabels) {
             const backupBtn = page.getByRole('button', { name: label, exact: false }).first();
@@ -57,12 +53,6 @@ async function updateAndCleanupSecrets(tokenData) {
     const payload = Buffer.from(JSON.stringify(tokenData), 'utf8');
     const [newVersion] = await client.addSecretVersion({ parent, payload: { data: payload } });
     console.log(`✅ Token Version ${newVersion.name.split('/').pop()} synced.`);
-    const [versions] = await client.listSecretVersions({ parent });
-    for (const v of versions) {
-        if (v.name !== newVersion.name && v.state !== 'DESTROYED') {
-            await client.destroySecretVersion({ name: v.name });
-        }
-    }
 }
 
 async function exchangeCodeForToken(code) {
@@ -75,31 +65,18 @@ async function exchangeCodeForToken(code) {
 }
 
 async function main() {
-    console.log("🚀 Starting Firefox OAuth task on Ubuntu...");
+    console.log("🚀 Starting Chrome OAuth task on GitHub Hosted Runner...");
     const authUrl = `https://api.schwabapi.com/v1/oauth/authorize?client_id=${APP_KEY}&redirect_uri=${REDIRECT_URI}`;
     const userDataDir = path.resolve(__dirname, 'schwab-local-session'); 
 
-    const context = await firefox.launchPersistentContext(userDataDir, {
-        executablePath: '/usr/bin/firefox',
+    const context = await chromium.launchPersistentContext(userDataDir, {
+        channel: 'chrome',
         headless: false,
-        env: {
-            ...process.env,
-            DISPLAY: ':1', 
-            MOZ_FORCE_DISABLE_E10S: '1'
-        },
         args: [
-            '--width=1280',
-            '--height=800',
-            '--no-remote'
+            '--no-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1280,800'
         ],
-        firefoxUserPrefs: {
-            'browser.tabs.remote.autostart': false, 
-            'browser.cache.disk.enable': false, 
-            'browser.cache.memory.enable': true, 
-            'browser.cache.memory.capacity': 102400,
-            'javascript.options.mem.max_old_space_size': 256, 
-            'image.mem.surfacecache_max_size_kb': 10240,
-        },
         viewport: { width: 1280, height: 800 }
     });
 
@@ -112,7 +89,7 @@ async function main() {
 
     try {
         console.log("🌐 1. Navigating to auth page...");
-        await page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(authUrl, { waitUntil: 'networkidle', timeout: 60000 });
         await humanDelay(3000, 5000);
 
         console.log("⌨️ 2. Entering credentials...");
@@ -125,7 +102,6 @@ async function main() {
             const codeInput = page.getByRole('spinbutton', { name: 'Security Code' });
             await codeInput.waitFor({ timeout: 20000 });
             const token = new TOTP({ secret: TOTP_SECRET.replace(/\s/g, "") }).generate();
-            console.log(`👉 Generated TOTP: ${token}`);
             await codeInput.fill(token);
             await page.getByRole('button', { name: 'Continue' }).click();
         } catch (e) {
@@ -134,7 +110,7 @@ async function main() {
         }
 
         console.log("✅ 4. Authorizing...");
-        await humanDelay(6000, 10000);
+        await humanDelay(8000, 12000);
 
         try {
             const cb = page.getByRole('checkbox', { name: /By checking this box/i });

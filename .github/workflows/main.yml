@@ -7,7 +7,7 @@ on:
 
 jobs:
   refresh-token:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -19,11 +19,12 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Dependencies & Firefox
+      - name: Install Google Chrome & Dependencies
         run: |
+          sudo apt-get update
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt install -y ./google-chrome-stable_current_amd64.deb
           npm install
-          npx playwright install firefox
-          npx playwright install-deps firefox
 
       - name: Run Refresh Script
         run: npm start
@@ -50,9 +51,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
           echo "Last successful refresh: $(date '+%Y-%m-%d %H:%M:%S')" > last_run.txt
-          
           git checkout -B logs
           git add last_run.txt
           git commit -m "chore: update token refresh log [skip ci]"
