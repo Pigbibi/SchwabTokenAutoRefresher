@@ -1,9 +1,8 @@
 name: Auto Merge Dependabot PR
 
+# Disabled tombstone: runtime and credential repositories require manual dependency merges.
 "on":
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  workflow_dispatch:
 
 jobs:
   auto-merge:

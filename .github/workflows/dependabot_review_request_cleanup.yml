@@ -1,8 +1,8 @@
 name: Dismiss Dependabot Review Request
 
+# Disabled tombstone: automatic cleanup cannot retract an already-sent review notification.
 "on":
-  pull_request_target:
-    types: [review_requested]
+  workflow_dispatch:
 
 permissions:
   contents: read

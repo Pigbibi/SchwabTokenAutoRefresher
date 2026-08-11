@@ -1,1 +1,7 @@
-* @Pigbibi
+# Token refresh, workflow, and dependency changes require owner visibility.
+/.github/CODEOWNERS @Pigbibi
+/.github/workflows/ @Pigbibi
+/main.js @Pigbibi
+/lib/ @Pigbibi
+/package.json @Pigbibi
+/package-lock.json @Pigbibi
