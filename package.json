@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@google-cloud/secret-manager": "^6.2.0",
-    "axios": "^1.18.1",
+    "axios": "^1.19.0",
     "https-proxy-agent": "^9.1.0",
     "otpauth": "^9.2.2",
     "playwright": "^1.61.1",
