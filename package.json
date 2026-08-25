@@ -9,7 +9,7 @@
     "start": "xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' node main.js"
   },
   "dependencies": {
-    "@google-cloud/secret-manager": "^6.2.0",
+    "@google-cloud/secret-manager": "^6.3.0",
     "axios": "^1.18.1",
     "https-proxy-agent": "^9.1.0",
     "otpauth": "^9.2.2",
