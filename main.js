@@ -51,8 +51,6 @@ const DELAYS = {
 const VIEWPORT = { width: 1280, height: 800 };
 const TOTP_PERIOD_SECONDS = 30;
 const TOTP_MIN_VALIDITY_SECONDS = 20;
-const TWO_FA_MAX_ATTEMPTS = 2;
-const AUTH_NAVIGATION_MAX_ATTEMPTS = 3;
 const FORCE_PROXY_FIRST = String(process.env.SCHWAB_FORCE_PROXY_FIRST || '').toLowerCase() === 'true';
 const FALLBACK_PROXY_URL = resolveProxyUrl(process.env);
 const SECRET_VERSION_RETENTION = Math.max(
@@ -264,40 +262,22 @@ async function navigateToLoginForm(page, authUrl) {
     const loginInput = page.getByRole('textbox', { name: /Login ID/i });
     const passwordInput = page.getByRole('textbox', { name: /Password/i });
 
-    for (let attempt = 1; attempt <= AUTH_NAVIGATION_MAX_ATTEMPTS; attempt += 1) {
-        console.log(`1. Navigating to auth page, attempt ${attempt}/${AUTH_NAVIGATION_MAX_ATTEMPTS}...`);
+    console.log('1. Navigating to auth page...');
+    try {
         await page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.AUTH_PAGE });
-        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-        await humanDelay(DELAYS.CREDENTIAL_ENTRY.min, DELAYS.CREDENTIAL_ENTRY.max);
-
-        try {
-            await loginInput.waitFor({ state: 'visible', timeout: TIMEOUTS.LOGIN_FORM });
-            await passwordInput.waitFor({ state: 'visible', timeout: TIMEOUTS.LOGIN_FORM });
-            return { loginInput, passwordInput };
-        } catch (e) {
-            const title = await page.title().catch(() => '');
-            console.log(`Login form was not visible on attempt ${attempt}/${AUTH_NAVIGATION_MAX_ATTEMPTS}.`);
-            console.log(`Current auth page state: ${JSON.stringify({ url: summarizeUrl(page.url()), title: title || null })}`);
-            await saveScreenshot(page, `auth_page_attempt_${attempt}.png`);
-
-            if (attempt === AUTH_NAVIGATION_MAX_ATTEMPTS) {
-                throw new Error(`Login form did not become visible after ${AUTH_NAVIGATION_MAX_ATTEMPTS} attempts: ${sanitizeError(e.message)}`);
-            }
-
-            await humanDelay(4000, 7000);
-        }
+    } catch (err) {
+        // Only a known initial connection failure precedes any credential entry.
+        err.retryBeforeCredentialEntry = isRetryableWithProxy(err.message, true);
+        throw err;
     }
-
-    throw new Error('Login form navigation attempts were exhausted.');
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await humanDelay(DELAYS.CREDENTIAL_ENTRY.min, DELAYS.CREDENTIAL_ENTRY.max);
+    await loginInput.waitFor({ state: 'visible', timeout: TIMEOUTS.LOGIN_FORM });
+    await passwordInput.waitFor({ state: 'visible', timeout: TIMEOUTS.LOGIN_FORM });
+    return { loginInput, passwordInput };
 }
 
-async function detectLoginPageRejection(page, loginInput, passwordInput) {
-    const loginVisible = await loginInput.isVisible().catch(() => false);
-    const passwordVisible = await passwordInput.isVisible().catch(() => false);
-    if (!loginVisible || !passwordVisible) {
-        return null;
-    }
-
+async function detectLoginPageRejection(page) {
     const bodyText = await page.locator('body').innerText({ timeout: 2000 }).catch(() => '');
     if (looksLikeCredentialOrRiskBanner(bodyText)) {
         return bodyText;
@@ -342,31 +322,23 @@ async function submitTwoFactorCode(page) {
 
     const totp = new TOTP({ secret: TOTP_SECRET.replace(/\s/g, "") });
 
-    for (let attempt = 1; attempt <= TWO_FA_MAX_ATTEMPTS; attempt += 1) {
-        await waitForFreshTotpWindow();
-        const token = totp.generate();
-        console.log(`Submitting 2FA code, attempt ${attempt}/${TWO_FA_MAX_ATTEMPTS}...`);
-        await codeInput.fill('');
-        await codeInput.fill(token);
-        await continueButton.click();
-        await page.waitForTimeout(3000);
+    await waitForFreshTotpWindow();
+    const token = totp.generate();
+    console.log('Submitting 2FA code...');
+    await codeInput.fill('');
+    await codeInput.fill(token);
+    await continueButton.click();
+    await page.waitForTimeout(3000);
 
-        const invalidCodeMessage = page.getByText('Enter a valid 6-digit security code.');
-        const loginErrorBanner = page.getByText(/We cant log you in right now/i);
-        const stillOnCodePage =
-            (await codeInput.isVisible().catch(() => false)) &&
-            ((await invalidCodeMessage.isVisible().catch(() => false)) ||
-                (await loginErrorBanner.isVisible().catch(() => false)));
-
-        if (!stillOnCodePage) {
-            return;
-        }
-
-        if (attempt === TWO_FA_MAX_ATTEMPTS) {
-            throw new Error('2FA code was rejected after retry.');
-        }
-
-        console.log('2FA code was rejected, retrying with a fresh TOTP code...');
+    const invalidCodeMessage = page.getByText('Enter a valid 6-digit security code.');
+    const loginErrorBanner = page.getByText(/We cant log you in right now/i);
+    const stillOnCodePage =
+        (await codeInput.isVisible().catch(() => false)) &&
+        ((await invalidCodeMessage.isVisible().catch(() => false)) ||
+            (await loginErrorBanner.isVisible().catch(() => false)));
+    const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '');
+    if (stillOnCodePage || looksLikeCredentialOrRiskBanner(bodyText)) {
+        throw new Error('2FA code was rejected; human review required.');
     }
 }
 
@@ -456,14 +428,6 @@ async function exchangeCodeForToken(code, proxyUrl) {
     }
 }
 
-class RetryWithProxyError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = 'RetryWithProxyError';
-        this.retryWithProxy = true;
-    }
-}
-
 function buildAttemptPlan() {
     if (FORCE_PROXY_FIRST) {
         return [
@@ -502,6 +466,7 @@ async function runRefreshOnce({ label, modeLabel = label, proxyUrl }) {
     const page = context.pages()[0] || await context.newPage();
     attachPageDiagnostics(page);
     let interceptedCode = null;
+    let credentialsStarted = false;
 
     page.on('request', r => {
         const requestUrl = r.url();
@@ -522,14 +487,16 @@ async function runRefreshOnce({ label, modeLabel = label, proxyUrl }) {
     try {
         const { loginInput, passwordInput } = await navigateToLoginForm(page, authUrl);
         console.log("2. Entering credentials...");
+        // Filling can trigger browser-side submission; do not wait for click success.
+        credentialsStarted = true;
         await loginInput.fill(USERNAME);
         await passwordInput.fill(PASSWORD);
         await page.getByRole('button', { name: 'Log in' }).click();
         await page.waitForTimeout(3000);
 
-        const rejectionText = await detectLoginPageRejection(page, loginInput, passwordInput);
+        const rejectionText = await detectLoginPageRejection(page);
         if (rejectionText) {
-            throw new RetryWithProxyError(`Login page rejected credentials or flagged risk: ${sanitizeError(rejectionText)}`);
+            throw new Error(`Login page rejected credentials or flagged risk: ${sanitizeError(rejectionText)}`);
         }
 
         console.log("3. Processing 2FA code...");
@@ -543,7 +510,7 @@ async function runRefreshOnce({ label, modeLabel = label, proxyUrl }) {
                 .filter(Boolean)
                 .join(' ');
             if (looksLikeCredentialOrRiskBanner(rejectionText)) {
-                throw new RetryWithProxyError(`Login page rejected credentials or flagged risk during 2FA step: ${sanitizeError(rejectionText)}`);
+                throw new Error(`Login page rejected credentials or flagged risk during 2FA step: ${sanitizeError(rejectionText)}`);
             }
             throw new Error(`2FA step failed: ${sanitizeError(e.message)}`);
         }
@@ -578,6 +545,7 @@ async function runRefreshOnce({ label, modeLabel = label, proxyUrl }) {
         console.log("SUCCESS! Token refreshed and synced.");
 
     } catch (err) {
+        err.retryBeforeCredentialEntry = !credentialsStarted && err.retryBeforeCredentialEntry === true;
         await saveScreenshot(page, 'last_error_state.png');
         throw err;
     } finally {
@@ -602,7 +570,8 @@ async function main() {
             return;
         } catch (err) {
             lastError = err;
-            const shouldRetry = index < attemptPlan.length - 1 && (err.retryWithProxy || isRetryableWithProxy(err.message));
+            const shouldRetry = index < attemptPlan.length - 1
+                && isRetryableWithProxy(err.message, err.retryBeforeCredentialEntry === true);
             if (shouldRetry) {
                 console.log(`Retryable Schwab error on ${attempt.label} mode; trying ${attemptPlan[index + 1].label} mode next.`);
                 continue;
@@ -616,8 +585,10 @@ async function main() {
     }
 }
 
-main().catch(err => {
-    console.error("Failure:", sanitizeError(err.message));
-    if (err.stack) console.error("Stack:", sanitizeError(err.stack));
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch(err => {
+        console.error("Failure:", sanitizeError(err.message));
+        if (err.stack) console.error("Stack:", sanitizeError(err.stack));
+        process.exit(1);
+    });
+}
